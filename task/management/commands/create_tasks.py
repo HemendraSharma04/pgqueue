@@ -16,7 +16,7 @@ class Command(BaseCommand):
            queue = TaskQueue.objects.create(name="default", description="Default queue")
 
         batch_size = 10000
-        num_batches = 10  # This will create 100k records (1000 * 100)
+        num_batches = 100  # This will create 100k records (1000 * 100)
 
         self.stdout.write("Starting to create tasks...")
 
@@ -36,4 +36,4 @@ class Command(BaseCommand):
 
             self.stdout.write(f"Created batch {batch + 1}/{num_batches}")
 
-        self.stdout.write(self.style.SUCCESS("Successfully created 100k sample tasks"))
+        self.stdout.write(self.style.SUCCESS("Successfully created 1000k sample tasks"))
