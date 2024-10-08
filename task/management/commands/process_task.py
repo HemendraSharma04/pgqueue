@@ -32,9 +32,7 @@ class Command(BaseCommand):
         return worker
 
     def process_task(self, task):
-        computation_time = random.randint(100, 500) / 1000  # 100 to 500 milliseconds
-        time.sleep(computation_time)  # Uncomment this line to simulate processing time
-
+        computation_time = random.randint(100, 500) / 1000 # Random time in seconds
         task.result = f"Computed for {computation_time:.3f} seconds"
         task.status = "completed"
         task.completed_at = timezone.now()
@@ -60,7 +58,7 @@ class Command(BaseCommand):
 
                 with transaction.atomic():
                     tasks = (
-                        Task.objects.filter(status="pending", worker__isnull=True)
+                        Task.objects.filter(status="pending")
                         .select_for_update(skip_locked=True)
                         .order_by("created_at")[:batch_size]
                     )
