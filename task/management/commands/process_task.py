@@ -55,7 +55,7 @@ class Command(BaseCommand):
 
                 with transaction.atomic():
                     tasks = (
-                        Task.objects.filter(status="pending", worker__isnull=True)
+                        Task.objects.filter(status="pending")
                         .select_for_update(skip_locked=True)
                         .order_by("created_at")[:batch_size]
                     )
