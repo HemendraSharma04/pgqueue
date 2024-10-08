@@ -33,10 +33,9 @@ class Command(BaseCommand):
         )
         return worker
 
+    # we can do bulk update here too
     def process_task(self, task):
         computation_time = random.randint(100, 500) / 1000  # 100 to 500 milliseconds
-        # time.sleep(computation_time)
-
         task.result = f"Computed for {computation_time:.3f} seconds"
         task.status = "completed"
         task.completed_at = timezone.now()
@@ -61,23 +60,27 @@ class Command(BaseCommand):
                         .order_by("created_at")[:batch_size]
                     )
 
+                    task_ids = list(tasks.values_list("id", flat=True))
+
                     if not tasks:
                         time.sleep(0.1)  # Short sleep if no tasks found
                         continue
 
-                    for task in tasks:
-                        if stop_event.is_set():
-                            break
+                    Task.objects.filter(id__in=task_ids).update(
+                        status="processing",
+                        last_picked_at=timezone.now(),
+                        picked_at=F("picked_at") or timezone.now(),
+                        worker=worker,
+                    )
 
-                        task.status = "processing"
-                        task.last_picked_at = timezone.now()
-                        task.picked_at = task.picked_at or timezone.now()
-                        task.worker = worker
-                        task.save()
+                # Process tasks
+                for task in tasks:
+                    if stop_event.is_set():
+                        break
 
-                        computation_time = self.process_task(task)
-                        total_computation_time += computation_time
-                        tasks_processed += 1
+                    computation_time = self.process_task(task)
+                    total_computation_time += computation_time
+                    tasks_processed += 1
 
                 if tasks_processed > 0:
                     self.stdout.write(
