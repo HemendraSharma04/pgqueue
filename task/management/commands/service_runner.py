@@ -29,10 +29,8 @@ def long_running_task(task_id):
     process_name = current_process().name
     start_time = time.time()
 
-    while time.time() - start_time < 150:  # Run for 150 seconds
-        time.sleep(5)  # Print every 5 seconds
-        write_to_file(f"Task {task_id} in {process_name} (PID: {pid})")
-
+   
+    time.sleep(14)  # Print every 5 seconds
     write_to_file(f"Task {task_id} completed by {process_name} (PID: {pid})")
 
 
