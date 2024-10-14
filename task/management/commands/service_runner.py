@@ -31,7 +31,9 @@ def long_running_task(task_id):
             )
             return
         time.sleep(5)  # Check for shutdown every 5 seconds
-    write_to_file(f"Task {task_id} completed by {current_process().name}")
+    write_to_file(
+        f"Task {task_id} completed by {current_process().name} and id {current_process().id}"
+    )
 
 
 def worker(task_queue):
@@ -76,7 +78,7 @@ class Command(BaseCommand):
             global shutdown_flag
             shutdown_flag = True
             for p in processes:
-                p.join(timeout=30)  # Give each process 30 seconds to shut down
+                p.join(timeout=200)  # Give each process 30 seconds to shut down
                 if p.is_alive():
                     write_to_file(
                         f"Process {p.name} did not shut down gracefully. Terminating."
