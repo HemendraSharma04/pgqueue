@@ -19,7 +19,7 @@ class Command(BaseCommand):
         uuid=uuid.uuid4()
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        with open(f"/tmp/worker_{worker_id}_task_{task_id}.log", "w") as f:
+        with open(f"service_log.log", "w") as f:
             f.write(
                 f"Process ID: {pid}, uuid:{uuid} , Worker: {worker_id}, Task: {task_id}, Timestamp: {timestamp}\n"
             )
@@ -27,7 +27,7 @@ class Command(BaseCommand):
         # Simulate long-running work
         time.sleep(120)  # Run for 1 hour
 
-        with open(f"/tmp/worker_{worker_id}_task_{task_id}.log", "w") as f:
+        with open(f"service_log.log", "w") as f:
             f.write(
                 f"Ended Process ID: {pid},uuid:{uuid} , Worker: {worker_id}, Task: {task_id}, Timestamp: {timestamp}\n"
             )
