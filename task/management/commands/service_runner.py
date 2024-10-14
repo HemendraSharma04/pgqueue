@@ -26,7 +26,7 @@ class Command(BaseCommand):
             )
 
         # Simulate long-running work
-        time.sleep(120)  # Run for 1 hour
+        time.sleep(25)  
 
         with open(f"service_log.log", "a") as f:
             f.write(
