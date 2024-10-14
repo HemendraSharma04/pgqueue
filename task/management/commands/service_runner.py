@@ -4,6 +4,7 @@ import time
 import os
 import uuid
 from datetime import datetime
+import pytz
 
 
 class Command(BaseCommand):
@@ -17,9 +18,9 @@ class Command(BaseCommand):
     def task(self, task_id, worker_id):
         pid = os.getpid()
         task_uuid=uuid.uuid4()
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        with open(f"service_log.log", "w") as f:
+        ist = pytz.timezone('Asia/Kolkata')
+        timestamp = datetime.now(ist).strftime("%Y-%m-%d %H:%M:%S")
+        with open(f"service_log.log", "a") as f:
             f.write(
                 f"Process ID: {pid}, uuid:{task_uuid} , Worker: {worker_id}, Task: {task_id}, Timestamp: {timestamp}\n"
             )
@@ -27,7 +28,7 @@ class Command(BaseCommand):
         # Simulate long-running work
         time.sleep(120)  # Run for 1 hour
 
-        with open(f"service_log.log", "w") as f:
+        with open(f"service_log.log", "a") as f:
             f.write(
                 f"Ended Process ID: {pid},uuid:{task_uuid} , Worker: {worker_id}, Task: {task_id}, Timestamp: {timestamp}\n"
             )
