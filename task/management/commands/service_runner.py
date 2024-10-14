@@ -24,7 +24,7 @@ def long_running_task(task_id):
     """Simulate a long-running task that periodically checks for shutdown signal."""
     logger.info(f"Task {task_id} started by {current_process().name}")
     start_time = time.time()
-    while time.time() - start_time < 60:  # Run for 1 minutes
+    while time.time() - start_time < 15:  # Run for 15 seconds
         if shutdown_flag:
             logger.info(
                 f"Task {task_id} interrupted after {time.time() - start_time:.2f} seconds"
@@ -47,7 +47,7 @@ def worker(task_queue):
 
 
 class Command(BaseCommand):
-    help = "Run multiple processes, each executing long tasks."
+    help = "Run multiple processes, each executing long tasks once."
 
     def handle(self, *args, **kwargs):
         num_workers = 3  # Number of worker processes
