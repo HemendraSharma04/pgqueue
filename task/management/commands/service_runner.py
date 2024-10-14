@@ -50,7 +50,7 @@ class Command(BaseCommand):
     help = "Run multiple processes, each executing long tasks once."
 
     def handle(self, *args, **kwargs):
-        num_workers = 3  # Number of worker processes
+        num_workers = 1  # Number of worker processes
         num_tasks = 5  # Total number of tasks to run
 
         logger.info("Starting service runner")
