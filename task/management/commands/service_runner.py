@@ -6,7 +6,7 @@ import time
 def long_running_task(task_id):
     """Simulate a 10-minute task."""
     print(f"Task {task_id} started by {current_process().name}")
-    time.sleep(60)  # Simulate 10 minutes
+    time.sleep(15)  # Simulate 10 minutes
     print(f"Task {task_id} completed by {current_process().name}")
 
 
