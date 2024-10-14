@@ -1,37 +1,37 @@
 import time
 import signal
-import logging
+from datetime import datetime
 from django.core.management.base import BaseCommand
 from multiprocessing import Process, Queue, current_process
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
-logger = logging.getLogger(__name__)
 
 # Global flag to signal shutdown
 shutdown_flag = False
 
 
+def write_to_file(message):
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open("service_log.txt", "a") as f:
+        f.write(f"{timestamp} - {message}\n")
+
+
 def signal_handler(signum, frame):
     global shutdown_flag
     shutdown_flag = True
-    logger.info(f"Process {current_process().name} received shutdown signal.")
+    write_to_file(f"Process {current_process().name} received shutdown signal.")
 
 
 def long_running_task(task_id):
     """Simulate a long-running task that periodically checks for shutdown signal."""
-    logger.info(f"Task {task_id} started by {current_process().name}")
+    write_to_file(f"Task {task_id} started by {current_process().name}")
     start_time = time.time()
     while time.time() - start_time < 15:  # Run for 15 seconds
         if shutdown_flag:
-            logger.info(
+            write_to_file(
                 f"Task {task_id} interrupted after {time.time() - start_time:.2f} seconds"
             )
             return
         time.sleep(5)  # Check for shutdown every 5 seconds
-    logger.info(f"Task {task_id} completed by {current_process().name}")
+    write_to_file(f"Task {task_id} completed by {current_process().name}")
 
 
 def worker(task_queue):
@@ -43,7 +43,7 @@ def worker(task_queue):
             long_running_task(task_id)
         except Queue.Empty:
             pass
-    logger.info(f"Worker {current_process().name} shutting down.")
+    write_to_file(f"Worker {current_process().name} shutting down.")
 
 
 class Command(BaseCommand):
@@ -53,7 +53,7 @@ class Command(BaseCommand):
         num_workers = 1  # Number of worker processes
         num_tasks = 5  # Total number of tasks to run
 
-        logger.info("Starting service runner")
+        write_to_file("Starting service runner")
 
         # Create a queue to hold the tasks
         task_queue = Queue()
@@ -72,15 +72,15 @@ class Command(BaseCommand):
             for p in processes:
                 p.join()
         except KeyboardInterrupt:
-            logger.info("Received interrupt. Shutting down gracefully...")
+            write_to_file("Received interrupt. Shutting down gracefully...")
             global shutdown_flag
             shutdown_flag = True
             for p in processes:
                 p.join(timeout=30)  # Give each process 30 seconds to shut down
                 if p.is_alive():
-                    logger.warning(
+                    write_to_file(
                         f"Process {p.name} did not shut down gracefully. Terminating."
                     )
                     p.terminate()
 
-        logger.info("All tasks have been completed or service has been shut down.")
+        write_to_file("All tasks have been completed or service has been shut down.")
