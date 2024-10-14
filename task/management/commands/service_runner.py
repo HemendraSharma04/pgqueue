@@ -29,14 +29,7 @@ def long_running_task(task_id):
     process_name = current_process().name
     start_time = time.time()
 
-    # write_to_file(f"Task {task_id} started by {process_name} (PID: {pid})")
-
-    while time.time() - start_time <150:  # Run for 1 minute
-        if shutdown_flag:
-            write_to_file(
-                f"Task {task_id} in {process_name} (PID: {pid}) interrupted after {time.time() - start_time:.2f} seconds"
-            )
-            return
+    while time.time() - start_time < 150:  # Run for 150 seconds
         time.sleep(5)  # Print every 5 seconds
         write_to_file(f"Task {task_id} in {process_name} (PID: {pid})")
 
@@ -44,22 +37,46 @@ def long_running_task(task_id):
 
 
 def worker(task_queue):
-    """Worker function to process tasks."""
+    """Worker function to process tasks with graceful shutdown handling."""
     signal.signal(signal.SIGTERM, signal_handler)
+    current_task = None
+    task_start_time = None
+
     while not shutdown_flag:
         try:
-            task_id = task_queue.get(timeout=1)
-            long_running_task(task_id)
+            if current_task is None:
+                current_task = task_queue.get(timeout=1)
+                task_start_time = time.time()
+                write_to_file(
+                    f"Starting task {current_task} in {current_process().name} (PID: {os.getpid()})"
+                )
+
+            if (
+                time.time() - task_start_time < 150
+            ):  # Allow task to run for up to 150 seconds
+                long_running_task(current_task)
+                current_task = None
+            else:
+                write_to_file(
+                    f"Task {current_task} in {current_process().name} (PID: {os.getpid()}) timed out"
+                )
+                current_task = None
+
         except Empty:
-            if task_queue.empty():
+            if task_queue.empty() and current_task is None:
                 break
 
-    # Allow time for task completion after shutdown signal
-    shutdown_start = time.time()
-    while time.time() - shutdown_start < 120:  # 2 minutes grace period
-        if not shutdown_flag:
-            break
-        time.sleep(1)
+    # Graceful shutdown: allow current task to complete if within time limit
+    if current_task is not None:
+        remaining_time = max(0, 150 - (time.time() - task_start_time))
+        write_to_file(
+            f"Allowing task {current_task} to complete (up to {remaining_time:.2f} seconds)"
+        )
+        shutdown_start = time.time()
+        while time.time() - shutdown_start < remaining_time:
+            if time.time() - task_start_time >= 150:
+                break
+            time.sleep(1)
 
     write_to_file(
         f"Worker {current_process().name} (PID: {os.getpid()}) shutting down."
@@ -67,7 +84,7 @@ def worker(task_queue):
 
 
 class Command(BaseCommand):
-    help = "Run multiple processes, each executing long tasks with PID printing."
+    help = "Run multiple processes, each executing long tasks with process-level graceful shutdown."
 
     def handle(self, *args, **kwargs):
         num_workers = 1  # Number of worker processes
@@ -96,9 +113,9 @@ class Command(BaseCommand):
             global shutdown_flag
             shutdown_flag = True
 
-            # Allow up to 2 minutes for graceful shutdown
+            # Allow up to 150 seconds for graceful shutdown
             shutdown_start = time.time()
-            while time.time() - shutdown_start < 120:
+            while time.time() - shutdown_start < 150:
                 if all(not p.is_alive() for p in processes):
                     break
                 time.sleep(1)
