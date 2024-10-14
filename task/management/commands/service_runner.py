@@ -55,6 +55,7 @@ class Command(BaseCommand):
 
         for i in range(num_workers):
             p = multiprocessing.Process(target=self.worker, args=(i,))
+            p.daemon = True
             workers.append(p)
             p.start()
 
