@@ -24,7 +24,7 @@ def long_running_task(task_id):
     """Simulate a long-running task that periodically checks for shutdown signal."""
     logger.info(f"Task {task_id} started by {current_process().name}")
     start_time = time.time()
-    while time.time() - start_time < 600:  # Run for 10 minutes
+    while time.time() - start_time < 60:  # Run for 1 minutes
         if shutdown_flag:
             logger.info(
                 f"Task {task_id} interrupted after {time.time() - start_time:.2f} seconds"
