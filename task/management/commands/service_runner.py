@@ -2,6 +2,7 @@ from django.core.management.base import BaseCommand
 import multiprocessing
 import time
 import os
+import uuid
 from datetime import datetime
 
 
@@ -15,19 +16,20 @@ class Command(BaseCommand):
 
     def task(self, task_id, worker_id):
         pid = os.getpid()
+        uuid=uuid.uuid4()
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         with open(f"/tmp/worker_{worker_id}_task_{task_id}.log", "w") as f:
             f.write(
-                f"Process ID: {pid}, Worker: {worker_id}, Task: {task_id}, Timestamp: {timestamp}\n"
+                f"Process ID: {pid}, uuid:{uuid} , Worker: {worker_id}, Task: {task_id}, Timestamp: {timestamp}\n"
             )
 
         # Simulate long-running work
         time.sleep(120)  # Run for 1 hour
-        
+
         with open(f"/tmp/worker_{worker_id}_task_{task_id}.log", "w") as f:
             f.write(
-                f"Ended Process ID: {pid}, Worker: {worker_id}, Task: {task_id}, Timestamp: {timestamp}\n"
+                f"Ended Process ID: {pid},uuid:{uuid} , Worker: {worker_id}, Task: {task_id}, Timestamp: {timestamp}\n"
             )
 
     def worker(self, worker_id):
