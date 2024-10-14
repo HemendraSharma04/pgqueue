@@ -16,12 +16,12 @@ class Command(BaseCommand):
 
     def task(self, task_id, worker_id):
         pid = os.getpid()
-        uuid=uuid.uuid4()
+        task_uuid=uuid.uuid4()
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         with open(f"service_log.log", "w") as f:
             f.write(
-                f"Process ID: {pid}, uuid:{uuid} , Worker: {worker_id}, Task: {task_id}, Timestamp: {timestamp}\n"
+                f"Process ID: {pid}, uuid:{task_uuid} , Worker: {worker_id}, Task: {task_id}, Timestamp: {timestamp}\n"
             )
 
         # Simulate long-running work
@@ -29,7 +29,7 @@ class Command(BaseCommand):
 
         with open(f"service_log.log", "w") as f:
             f.write(
-                f"Ended Process ID: {pid},uuid:{uuid} , Worker: {worker_id}, Task: {task_id}, Timestamp: {timestamp}\n"
+                f"Ended Process ID: {pid},uuid:{task_uuid} , Worker: {worker_id}, Task: {task_id}, Timestamp: {timestamp}\n"
             )
 
     def worker(self, worker_id):
