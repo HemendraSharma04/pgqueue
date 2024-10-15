@@ -1,6 +1,8 @@
 import os
 import time
 import signal
+import logging
+import logging.handlers
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
@@ -8,8 +10,16 @@ from task.models import Task
 from worker.models import Worker
 import multiprocessing
 
+# Configure logging
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+syslog_handler = logging.handlers.SysLogHandler(address="/dev/log")
+formatter = logging.Formatter("%(name)s: %(levelname)s %(message)s")
+syslog_handler.setFormatter(formatter)
+logger.addHandler(syslog_handler)
 
-def process_task(task_id,pid):
+
+def process_task(task_id, pid):
     """Process a single task."""
     import django
 
@@ -25,9 +35,9 @@ def process_task(task_id,pid):
         task.completed_at = timezone.now()
         task.counter = pid
         task.save()
-        print(f"Task {task_id} completed.")
+        logger.info(f"Task {task_id} completed.")
     except Exception as e:
-        print(f"Error processing task {task_id}: {str(e)}")
+        logger.error(f"Error processing task {task_id}: {str(e)}")
 
 
 def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
@@ -37,67 +47,75 @@ def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
     django.setup()
 
     worker = Worker.objects.create(name=f"Worker-{worker_id}", status="active")
-    print(f"Worker {worker.name} (PID: {os.getpid()}) started...")
+    logger.info(f"Worker {worker.name} (PID: {os.getpid()}) started...")
 
     processed_tasks = 0
+    current_batch = []
 
     while not shutdown_flag.is_set() and processed_tasks < total_tasks:
         try:
-           
-            with transaction.atomic():
-                
-                print("------------fetching tasks------------")
-                tasks = (
-                    Task.objects.filter(status="pending")
-                    .select_for_update(skip_locked=True)
-                    .order_by("created_at")[:batch_size]
+            if not current_batch:
+                with transaction.atomic():
+                    logger.info("Fetching tasks...")
+                    tasks = (
+                        Task.objects.filter(status="pending")
+                        .select_for_update(skip_locked=True)
+                        .order_by("created_at")[:batch_size]
+                    )
+
+                    if not tasks:
+                        time.sleep(0.5)
+                        continue
+
+                    task_ids = [task.id for task in tasks]
+                    Task.objects.filter(id__in=task_ids).update(
+                        status="processing", worker=worker
+                    )
+                    current_batch = task_ids
+
+                logger.info(
+                    f"Fetched {len(current_batch)} tasks. Starting processing..."
                 )
-
-                if not tasks:
-                    time.sleep(0.5)
-                    continue
-
-                Task.objects.filter(id__in=[task.id for task in tasks]).update(
-                    status="processing", worker=worker
-                )
-
-            print(f"Fetched {len(tasks)} tasks. Starting processing...")
 
             # Process each task in the batch
-            for task in tasks:
+            for task_id in current_batch:
                 if shutdown_flag.is_set():
-                    print(f"Worker {worker.name}: Graceful shutdown in progress...")
+                    logger.info(
+                        f"Worker {worker.name}: Graceful shutdown in progress..."
+                    )
                     break  # Stop processing if shutdown signal is received
 
                 # Fork a new process to handle the task
                 pid = os.fork()
                 if pid == 0:  # Child process
                     try:
-                        process_task(task.id,pid)
+                        process_task(task_id, os.getpid())
                     finally:
-                        print("exit child process")
+                        logger.info("Exiting child process")
                         os._exit(0)  # Exit the child process
                 else:  # Parent process
-                    # Wait for the child process to finish
-                    print("wait for  child process")
+                    logger.info(f"Waiting for child process {pid}")
                     pid, status = os.waitpid(pid, 0)
                     if os.WIFEXITED(status) and os.WEXITSTATUS(status) != 0:
-                        print(f"Child process {pid} exited with error.")
+                        logger.error(f"Child process {pid} exited with error.")
 
                 if shutdown_flag.is_set():
-                    print(
+                    logger.info(
                         f"Worker {worker.name}: Stopped processing due to shutdown signal."
                     )
                     break
 
                 processed_tasks += 1
-                print(f"Processed {processed_tasks}/{total_tasks} tasks.")
+                logger.info(f"Processed {processed_tasks}/{total_tasks} tasks.")
+
+            # Clear the current batch after processing all tasks
+            current_batch = []
 
         except Exception as e:
-            print(f"Error in worker {worker.name}: {str(e)}")
+            logger.error(f"Error in worker {worker.name}: {str(e)}")
             time.sleep(1)
 
-    print(f"Worker {worker.name} shutting down...")
+    logger.info(f"Worker {worker.name} shutting down...")
     worker.status = "inactive"
     worker.save()
 
@@ -128,7 +146,7 @@ class Command(BaseCommand):
         shutdown_flag = multiprocessing.Event()
         processes = []
 
-        print(f"Starting {num_workers} workers...")
+        logger.info(f"Starting {num_workers} workers...")
 
         for i in range(num_workers):
             p = multiprocessing.Process(
@@ -141,4 +159,4 @@ class Command(BaseCommand):
         for p in processes:
             p.join()
 
-        print("All workers have completed.")
+        logger.info("All workers have completed.")
