@@ -13,10 +13,10 @@ import multiprocessing
 # Configure logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-# syslog_handler = logging.handlers.SysLogHandler(address="/dev/log")
-# formatter = logging.Formatter("%(name)s: %(levelname)s %(message)s")
-# syslog_handler.setFormatter(formatter)
-# logger.addHandler(syslog_handler)
+syslog_handler = logging.handlers.SysLogHandler(address="/dev/log")
+formatter = logging.Formatter("%(name)s: %(levelname)s %(message)s")
+syslog_handler.setFormatter(formatter)
+logger.addHandler(syslog_handler)
 
 
 def process_task(task_id):
@@ -52,52 +52,55 @@ def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
     processed_tasks = 0
     current_batch = []
 
-    with multiprocessing.get_context("spawn").Pool() as pool:
-        while not shutdown_flag.is_set() and processed_tasks < total_tasks:
-            try:
-                if not current_batch:
-                    with transaction.atomic():
-                        logger.info("Fetching tasks...")
-                        tasks = (
-                            Task.objects.filter(status="pending")
-                            .select_for_update(skip_locked=True)
-                            .order_by("created_at")[:batch_size]
-                        )
-
-                        if not tasks:
-                            time.sleep(0.5)
-                            continue
-
-                        task_ids = [task.id for task in tasks]
-                        Task.objects.filter(id__in=task_ids).update(
-                            status="processing", worker=worker
-                        )
-                        current_batch = task_ids
-
-                    logger.info(
-                        f"Fetched {len(current_batch)} tasks. Starting processing..."
+    while not shutdown_flag.is_set() and processed_tasks < total_tasks:
+        try:
+            if not current_batch:
+                with transaction.atomic():
+                    logger.info("Fetching tasks...")
+                    tasks = (
+                        Task.objects.filter(status="pending")
+                        .select_for_update(skip_locked=True)
+                        .order_by("created_at")[:batch_size]
                     )
 
-                # Process each task in the batch
-                for task_id in current_batch:
-                    if shutdown_flag.is_set():
-                        logger.info(
-                            f"Worker {worker.name}: Graceful shutdown in progress..."
-                        )
-                        break  # Stop processing if shutdown signal is received
+                    if not tasks:
+                        time.sleep(0.5)
+                        continue
 
-                    # Use pool.apply_async to process the task
-                    pool.apply_async(process_task, (task_id,))
+                    task_ids = [task.id for task in tasks]
+                    Task.objects.filter(id__in=task_ids).update(
+                        status="processing", worker=worker
+                    )
+                    current_batch = task_ids
 
-                    processed_tasks += 1
-                    logger.info(f"Processed {processed_tasks}/{total_tasks} tasks.")
+                logger.info(
+                    f"Fetched {len(current_batch)} tasks. Starting processing..."
+                )
 
-                # Clear the current batch after processing all tasks
-                current_batch = []
+            # Process each task in the batch
+            for task_id in current_batch:
+                if shutdown_flag.is_set():
+                    logger.info(
+                        f"Worker {worker.name}: Graceful shutdown in progress..."
+                    )
+                    break  # Stop processing if shutdown signal is received
 
-            except Exception as e:
-                logger.error(f"Error in worker {worker.name}: {str(e)}")
-                time.sleep(1)
+                # Use multiprocessing.Process to run each task
+                p = multiprocessing.get_context("spawn").Process(
+                    target=process_task, args=(task_id,)
+                )
+                p.start()
+                p.join()  # Wait for the task to complete
+
+                processed_tasks += 1
+                logger.info(f"Processed {processed_tasks}/{total_tasks} tasks.")
+
+            # Clear the current batch after processing all tasks
+            current_batch = []
+
+        except Exception as e:
+            logger.error(f"Error in worker {worker.name}: {str(e)}")
+            time.sleep(1)
 
     logger.info(f"Worker {worker.name} shutting down...")
     worker.status = "inactive"
@@ -127,31 +130,33 @@ class Command(BaseCommand):
         batch_size = options["batch_size"]
         total_tasks = options["total_tasks"]
 
-        shutdown_flag = multiprocessing.Event()
-        processes = []
+        # Use Manager for cross-process synchronization
+        with multiprocessing.get_context("spawn").Manager() as manager:
+            shutdown_flag = manager.Event()
+            processes = []
 
-        logger.info(f"Starting {num_workers} workers...")
+            logger.info(f"Starting {num_workers} workers...")
 
-        for i in range(num_workers):
-            p = multiprocessing.get_context("spawn").Process(
-                target=worker_process,
-                args=(batch_size, total_tasks, shutdown_flag, i),
-            )
-            p.start()
-            processes.append(p)
+            for i in range(num_workers):
+                p = multiprocessing.get_context("spawn").Process(
+                    target=worker_process,
+                    args=(batch_size, total_tasks, shutdown_flag, i),
+                )
+                p.start()
+                processes.append(p)
 
-        def signal_handler(signum, frame):
-            logger.info("Received shutdown signal. Stopping workers...")
-            shutdown_flag.set()
+            def signal_handler(signum, frame):
+                logger.info("Received shutdown signal. Stopping workers...")
+                shutdown_flag.set()
 
-        signal.signal(signal.SIGTERM, signal_handler)
-        signal.signal(signal.SIGINT, signal_handler)
+            signal.signal(signal.SIGTERM, signal_handler)
+            signal.signal(signal.SIGINT, signal_handler)
 
-        try:
-            for p in processes:
-                p.join()
-        except KeyboardInterrupt:
-            logger.info("Received keyboard interrupt. Stopping workers...")
-            shutdown_flag.set()
+            try:
+                for p in processes:
+                    p.join()
+            except KeyboardInterrupt:
+                logger.info("Received keyboard interrupt. Stopping workers...")
+                shutdown_flag.set()
 
-        logger.info("All workers have completed.")
+            logger.info("All workers have completed.")
