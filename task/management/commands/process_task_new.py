@@ -23,8 +23,7 @@ def process_task(task_id,pid):
         task.result = f"Computed for {computation_time} seconds"
         task.status = "completed"
         task.completed_at = timezone.now()
-        task.extra_details=pid
-        task.counter = 1
+        task.counter = pid
         task.save()
         print(f"Task {task_id} completed.")
     except Exception as e:
@@ -32,7 +31,7 @@ def process_task(task_id,pid):
 
 
 def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
-    """Worker process that fetches tasks in batches and processes them."""
+    """Worker process that fetches tasks in batches and processes them one by one."""
     import django
 
     django.setup()
@@ -55,8 +54,8 @@ def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
 
     while not shutdown_flag.is_set() and processed_tasks < total_tasks:
         try:
-            # Fetch a batch of tasks
             with transaction.atomic():
+                # Fetch a batch of tasks
                 tasks = (
                     Task.objects.filter(status="pending")
                     .select_for_update(skip_locked=True)
@@ -64,26 +63,32 @@ def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
                 )
 
                 if not tasks:
-                    time.sleep(0.5)
+                    print(
+                        f"No pending tasks found. Worker {worker.name} is sleeping..."
+                    )
+                    time.sleep(0.5)  # Sleep for a while if no tasks are found
                     continue
 
+                # Update the status of the fetched tasks to 'processing'
                 Task.objects.filter(id__in=[task.id for task in tasks]).update(
                     status="processing", worker=worker
                 )
 
-            print(f"Fetched {len(tasks)} tasks. Starting processing...")
+            print(
+                f"Worker {worker.name} fetched {len(tasks)} tasks. Starting processing..."
+            )
 
-            # Process each task in the batch
+            # Process each task one by one
             for task in tasks:
                 if shutdown_flag.is_set():
                     print(f"Worker {worker.name}: Graceful shutdown in progress...")
-                    break  # Stop processing if shutdown signal is received
+                    break
 
-                # Start the task in a separate process
+                # Start the task in a separate process and pass the parent PID
                 p = multiprocessing.Process(
-                    target=process_task, args=(task.id,p.__dict__)
+                    target=process_task, args=(task.id, os.getpid())
                 )
-                print("fetch p details",p.__dict__)
+                print("fetch p details", p.__dict__)
                 p.start()
 
                 # Wait for the task to finish or for the shutdown signal
@@ -102,7 +107,9 @@ def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
                     break
 
                 processed_tasks += 1
-                print(f"Processed {processed_tasks}/{total_tasks} tasks.")
+                print(
+                    f"Worker {worker.name} has processed {processed_tasks}/{total_tasks} tasks."
+                )
 
         except Exception as e:
             print(f"Error in worker {worker.name}: {str(e)}")
