@@ -94,6 +94,10 @@ def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
                 )
                 process.daemon = False  # Allow it to run even if parent exits
                 process.start()
+                
+                while process.is_alive():
+                    print("process is alive----------------")
+                    time.sleep(2)
 
                 print(f"Started task {task_id} with PID {process.pid}")
 
