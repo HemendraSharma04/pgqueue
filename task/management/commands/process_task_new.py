@@ -9,7 +9,7 @@ from worker.models import Worker
 import multiprocessing
 
 
-def process_task(task_id):
+def process_task(task_id,pid):
     """Process a single task."""
     import django
 
@@ -23,7 +23,7 @@ def process_task(task_id):
         task.result = f"Computed for {computation_time} seconds"
         task.status = "completed"
         task.completed_at = timezone.now()
-        task.counter = 1
+        task.counter = pid
         task.save()
         print(f"Task {task_id} completed.")
     except Exception as e:
@@ -43,8 +43,10 @@ def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
 
     while not shutdown_flag.is_set() and processed_tasks < total_tasks:
         try:
-            # Fetch a batch of tasks
+           
             with transaction.atomic():
+                
+                print("------------fetching tasks------------")
                 tasks = (
                     Task.objects.filter(status="pending")
                     .select_for_update(skip_locked=True)
@@ -71,11 +73,13 @@ def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
                 pid = os.fork()
                 if pid == 0:  # Child process
                     try:
-                        process_task(task.id)
+                        process_task(task.id,pid)
                     finally:
+                        print("exit child process")
                         os._exit(0)  # Exit the child process
                 else:  # Parent process
                     # Wait for the child process to finish
+                    print("wait for  child process")
                     pid, status = os.waitpid(pid, 0)
                     if os.WIFEXITED(status) and os.WEXITSTATUS(status) != 0:
                         print(f"Child process {pid} exited with error.")
