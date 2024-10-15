@@ -9,10 +9,10 @@ import multiprocessing
 # Configure logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-# syslog_handler = logging.handlers.SysLogHandler(address="/dev/log")
-# formatter = logging.Formatter("%(name)s: %(levelname)s %(message)s")
-# syslog_handler.setFormatter(formatter)
-# logger.addHandler(syslog_handler)
+syslog_handler = logging.handlers.SysLogHandler(address="/dev/log")
+formatter = logging.Formatter("%(name)s: %(levelname)s %(message)s")
+syslog_handler.setFormatter(formatter)
+logger.addHandler(syslog_handler)
 
 
 def django_setup():
@@ -30,8 +30,11 @@ def process_task(task_id):
     try:
         print("fetched the task")
         task = Task.objects.get(id=task_id)
-        computation_time = 10  # Simulate task time
-        time.sleep(computation_time)
+        computation_time = 2  # Simulate task time
+        for i in range(5):
+            logger.info(f"Processing task {task_id} iteration {i}")
+            print(f"Processing task {task_id} iteration {i}")
+            time.sleep(2)
 
         task.result = f"Computed for {computation_time} seconds"
         task.status = "completed"
