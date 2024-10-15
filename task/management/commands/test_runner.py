@@ -202,6 +202,7 @@ def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
 
                 # Start the task in a separate process
                 p = multiprocessing.Process(target=process_task, args=(task.id,))
+                print("fetch p details",p.__dict__)
                 p.start()
 
                 # Wait for the task to finish or for the shutdown signal

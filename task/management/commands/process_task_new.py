@@ -8,7 +8,7 @@ from django.db import transaction
 from django.utils import timezone
 
 
-def process_task(task_id):
+def process_task(task_id,pid):
     """Process a single task."""
     import django
 
@@ -17,12 +17,13 @@ def process_task(task_id):
 
     try:
         task = Task.objects.get(id=task_id)
-        computation_time = random.randint(5, 10)  # Simulate task time
+        computation_time = 40  # Simulate task time
         time.sleep(computation_time)
 
         task.result = f"Computed for {computation_time} seconds"
         task.status = "completed"
         task.completed_at = timezone.now()
+        task.extra_details=pid
         task.counter = 1
         task.save()
         print(f"Task {task_id} completed.")
@@ -79,7 +80,10 @@ def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
                     break  # Stop processing if shutdown signal is received
 
                 # Start the task in a separate process
-                p = multiprocessing.Process(target=process_task, args=(task.id,))
+                p = multiprocessing.Process(
+                    target=process_task, args=(task.id,p.__dict__)
+                )
+                print("fetch p details",p.__dict__)
                 p.start()
 
                 # Wait for the task to finish or for the shutdown signal
@@ -137,6 +141,19 @@ class Command(BaseCommand):
 
         print(f"Starting {num_workers} workers...")
 
+        def sigterm_handler(signum, frame):
+            """Handle SIGTERM for main process shutdown."""
+            print("Main process received SIGTERM. Shutting down workers...")
+            shutdown_flag.set()
+
+        def sigint_handler(signum, frame):
+            """Handle SIGINT (Ctrl+C) for main process shutdown."""
+            print("Main process received SIGINT (Ctrl+C). Shutting down workers...")
+            shutdown_flag.set()
+
+        signal.signal(signal.SIGTERM, sigterm_handler)
+        signal.signal(signal.SIGINT, sigint_handler)
+
         for i in range(num_workers):
             p = multiprocessing.Process(
                 target=worker_process,
@@ -144,13 +161,6 @@ class Command(BaseCommand):
             )
             p.start()
             processes.append(p)
-
-        def sigterm_handler(signum, frame):
-            """Handle SIGTERM for main process shutdown."""
-            print("Main process received SIGTERM. Shutting down workers...")
-            shutdown_flag.set()
-
-        signal.signal(signal.SIGTERM, sigterm_handler)
 
         for p in processes:
             p.join()
