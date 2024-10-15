@@ -4,10 +4,6 @@ import signal
 import logging
 import logging.handlers
 from django.core.management.base import BaseCommand
-from django.db import transaction
-from django.utils import timezone
-from task.models import Task
-from worker.models import Worker
 import multiprocessing
 
 # Configure logging
@@ -19,11 +15,17 @@ syslog_handler.setFormatter(formatter)
 logger.addHandler(syslog_handler)
 
 
-def process_task(task_id):
-    """Process a single task."""
+def django_setup():
     import django
 
     django.setup()
+
+
+def process_task(task_id):
+    """Process a single task."""
+    django_setup()
+    from django.utils import timezone
+    from task.models import Task
 
     try:
         task = Task.objects.get(id=task_id)
@@ -42,9 +44,10 @@ def process_task(task_id):
 
 def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
     """Worker process that fetches tasks in batches and processes them."""
-    import django
-
-    django.setup()
+    django_setup()
+    from django.db import transaction
+    from task.models import Task
+    from worker.models import Worker
 
     worker = Worker.objects.create(name=f"Worker-{worker_id}", status="active")
     logger.info(f"Worker {worker.name} (PID: {os.getpid()}) started...")
