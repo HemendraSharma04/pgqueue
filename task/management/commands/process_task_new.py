@@ -5,6 +5,7 @@ import logging
 import logging.handlers
 from django.core.management.base import BaseCommand
 import multiprocessing
+from django.db import transaction
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -49,7 +50,6 @@ def process_task(task_id):
 def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
     """Worker process that fetches tasks in batches and processes them."""
     django_setup()
-    from django.db import transaction
     from task.models import Task
     from worker.models import Worker
 
@@ -80,38 +80,29 @@ def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
                     )
                     current_batch = task_ids
 
-                print(
-                    f"Fetched {len(current_batch)} tasks. Starting processing..."
-                )
+                print(f"Fetched {len(current_batch)} tasks. Starting processing...")
 
-            # Process each task in the batch
+            # Start child processes without waiting for them
             for task_id in current_batch:
                 if shutdown_flag.is_set():
-                    print(
-                        f"Worker {worker.name}: Graceful shutdown in progress..."
-                    )
-                    break  # Stop processing if shutdown signal is received
-
-                # Use multiprocessing.Process to run each task
-                p = multiprocessing.get_context("spawn").Process(
-                    target=process_task, args=(task_id,),daemon=True
-                )
-                p.daemon = True
-                p.start()
-
-                if shutdown_flag.is_set():
+                    print(f"Worker {worker.name}: Graceful shutdown in progress...")
                     break
-                # p.join()  # Wait for the task to complete
 
+                # Start the task as an independent process
+                process = multiprocessing.get_context("spawn").Process(
+                    target=process_task, args=(task_id,)
+                )
+                process.daemon = False  # Allow it to run even if parent exits
+                process.start()
+
+                print(f"Started task {task_id} with PID {process.pid}")
+
+                # No need to join, let it run independently in the background
                 processed_tasks += 1
                 print(f"Processed {processed_tasks}/{total_tasks} tasks.")
 
-            # Clear the current batch after processing all tasks
+            # Clear the batch after dispatching all tasks
             current_batch = []
-
-            for child in multiprocessing.active_children():
-                print("kill child to avoid zombie process")
-                child.join(timeout=0)
 
         except Exception as e:
             logger.error(f"Error in worker {worker.name}: {str(e)}")
