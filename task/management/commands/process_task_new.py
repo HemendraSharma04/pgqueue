@@ -92,7 +92,7 @@ def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
                 process = multiprocessing.get_context("spawn").Process(
                     target=process_task, args=(task_id,)
                 )
-                process.daemon = False  # Allow it to run even if parent exits
+                process.daemon = True  # Allow it to run even if parent exits
                 process.start()
                 
                 while process.is_alive():
