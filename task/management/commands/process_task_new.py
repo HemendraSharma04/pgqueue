@@ -96,8 +96,9 @@ def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
                 p = multiprocessing.get_context("spawn").Process(
                     target=process_task, args=(task_id,),daemon=True
                 )
-                p.start()
                 p.daemon = True
+                p.start()
+
                 if shutdown_flag.is_set():
                     break
                 # p.join()  # Wait for the task to complete
