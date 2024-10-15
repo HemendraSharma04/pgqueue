@@ -97,16 +97,20 @@ def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
                     target=process_task, args=(task_id,),daemon=True
                 )
                 p.start()
-                
+                p.daemon = True
                 if shutdown_flag.is_set():
                     break
-                p.join()  # Wait for the task to complete
+                # p.join()  # Wait for the task to complete
 
                 processed_tasks += 1
                 print(f"Processed {processed_tasks}/{total_tasks} tasks.")
 
             # Clear the current batch after processing all tasks
             current_batch = []
+
+            for child in multiprocessing.active_children():
+                print("kill child to avoid zombie process")
+                child.join(timeout=0)
 
         except Exception as e:
             logger.error(f"Error in worker {worker.name}: {str(e)}")
