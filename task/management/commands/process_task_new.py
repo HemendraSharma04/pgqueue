@@ -1,19 +1,19 @@
 import os
 import time
-import random
 import signal
-import multiprocessing
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
+from task.models import Task
+from worker.models import Worker
+import multiprocessing
 
 
-def process_task(task_id,pid):
+def process_task(task_id):
     """Process a single task."""
     import django
 
     django.setup()
-    from task.models import Task
 
     try:
         task = Task.objects.get(id=task_id)
@@ -23,7 +23,7 @@ def process_task(task_id,pid):
         task.result = f"Computed for {computation_time} seconds"
         task.status = "completed"
         task.completed_at = timezone.now()
-        task.counter = pid
+        task.counter = 1
         task.save()
         print(f"Task {task_id} completed.")
     except Exception as e:
@@ -31,31 +31,20 @@ def process_task(task_id,pid):
 
 
 def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
-    """Worker process that fetches tasks in batches and processes them one by one."""
+    """Worker process that fetches tasks in batches and processes them."""
     import django
 
     django.setup()
-    from task.models import Task
-    from worker.models import Worker
 
     worker = Worker.objects.create(name=f"Worker-{worker_id}", status="active")
     print(f"Worker {worker.name} (PID: {os.getpid()}) started...")
 
     processed_tasks = 0
 
-    def sigterm_handler(signum, frame):
-        """Handle SIGTERM for graceful shutdown."""
-        print(f"Worker {worker.name} received SIGTERM. Exiting gracefully...")
-        worker.status = "inactive"
-        worker.save()
-        shutdown_flag.set()
-
-    signal.signal(signal.SIGTERM, sigterm_handler)
-
     while not shutdown_flag.is_set() and processed_tasks < total_tasks:
         try:
+            # Fetch a batch of tasks
             with transaction.atomic():
-                # Fetch a batch of tasks
                 tasks = (
                     Task.objects.filter(status="pending")
                     .select_for_update(skip_locked=True)
@@ -63,42 +52,33 @@ def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
                 )
 
                 if not tasks:
-                    print(
-                        f"No pending tasks found. Worker {worker.name} is sleeping..."
-                    )
-                    time.sleep(0.5)  # Sleep for a while if no tasks are found
+                    time.sleep(0.5)
                     continue
 
-                # Update the status of the fetched tasks to 'processing'
                 Task.objects.filter(id__in=[task.id for task in tasks]).update(
                     status="processing", worker=worker
                 )
 
-            print(
-                f"Worker {worker.name} fetched {len(tasks)} tasks. Starting processing..."
-            )
+            print(f"Fetched {len(tasks)} tasks. Starting processing...")
 
-            # Process each task one by one
+            # Process each task in the batch
             for task in tasks:
                 if shutdown_flag.is_set():
                     print(f"Worker {worker.name}: Graceful shutdown in progress...")
-                    break
+                    break  # Stop processing if shutdown signal is received
 
-                # Start the task in a separate process and pass the parent PID
-                p = multiprocessing.Process(
-                    target=process_task, args=(task.id, os.getpid())
-                )
-                print("fetch p details", p.__dict__)
-                p.start()
-
-                # Wait for the task to finish or for the shutdown signal
-                while p.is_alive():
-                    if shutdown_flag.is_set():
-                        print(f"Worker {worker.name}: Graceful shutdown in progress...")
-                        break
-                    time.sleep(0.5)  # Poll every 0.5 seconds
-
-                p.join()  # Ensure the process completes
+                # Fork a new process to handle the task
+                pid = os.fork()
+                if pid == 0:  # Child process
+                    try:
+                        process_task(task.id)
+                    finally:
+                        os._exit(0)  # Exit the child process
+                else:  # Parent process
+                    # Wait for the child process to finish
+                    pid, status = os.waitpid(pid, 0)
+                    if os.WIFEXITED(status) and os.WEXITSTATUS(status) != 0:
+                        print(f"Child process {pid} exited with error.")
 
                 if shutdown_flag.is_set():
                     print(
@@ -107,9 +87,7 @@ def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
                     break
 
                 processed_tasks += 1
-                print(
-                    f"Worker {worker.name} has processed {processed_tasks}/{total_tasks} tasks."
-                )
+                print(f"Processed {processed_tasks}/{total_tasks} tasks.")
 
         except Exception as e:
             print(f"Error in worker {worker.name}: {str(e)}")
@@ -147,19 +125,6 @@ class Command(BaseCommand):
         processes = []
 
         print(f"Starting {num_workers} workers...")
-
-        def sigterm_handler(signum, frame):
-            """Handle SIGTERM for main process shutdown."""
-            print("Main process received SIGTERM. Shutting down workers...")
-            shutdown_flag.set()
-
-        def sigint_handler(signum, frame):
-            """Handle SIGINT (Ctrl+C) for main process shutdown."""
-            print("Main process received SIGINT (Ctrl+C). Shutting down workers...")
-            shutdown_flag.set()
-
-        signal.signal(signal.SIGTERM, sigterm_handler)
-        signal.signal(signal.SIGINT, sigint_handler)
 
         for i in range(num_workers):
             p = multiprocessing.Process(
