@@ -24,6 +24,8 @@ def django_setup():
 
 def process_task(task_id):
     """Process a single task."""
+    
+    os.setsid()
     django_setup()
     from django.utils import timezone
     from task.models import Task
