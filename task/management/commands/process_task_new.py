@@ -28,7 +28,7 @@ def process_task(task_id):
     from task.models import Task
 
     try:
-        print("fetched the task")
+        print("fetched the task!!!!!!!")
         task = Task.objects.get(id=task_id)
         computation_time = 2  # Simulate task time
         for i in range(5):
@@ -94,7 +94,7 @@ def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
 
                 # Use multiprocessing.Process to run each task
                 p = multiprocessing.get_context("spawn").Process(
-                    target=process_task, args=(task_id,)
+                    target=process_task, args=(task_id,),daemon=True
                 )
                 p.start()
                 
