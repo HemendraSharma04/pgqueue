@@ -3,12 +3,19 @@ import time
 import signal
 import logging
 import logging.handlers
-from django.core.management.base import BaseCommand
 import multiprocessing
+from django.core.management.base import BaseCommand
+from django.db import transaction
+import subprocess
+import psutil
 
 # Configure logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+syslog_handler = logging.handlers.SysLogHandler(address="/dev/log")
+formatter = logging.Formatter("%(name)s: %(levelname)s %(message)s")
+syslog_handler.setFormatter(formatter)
+logger.addHandler(syslog_handler)
 
 
 def django_setup():
@@ -17,152 +24,123 @@ def django_setup():
     django.setup()
 
 
-def process_task(task_id):
-    """Process a single task."""
-    django_setup()
-    from django.utils import timezone
-    from task.models import Task
-
+def execute_task(task_id):
     try:
-        print(f"Processing task {task_id}")
-        task = Task.objects.get(id=task_id)
-        computation_time = 20  # Simulate task time
-        time.sleep(computation_time)
-
-        task.result = f"Computed for {computation_time} seconds"
-        task.status = "completed"
-        task.completed_at = timezone.now()
-        task.counter = os.getpid()
-        task.save()
-        print(f"Task {task_id} completed.")
+        cmd = f"nohup python manage.py run_single_task {task_id} > /dev/null 2>&1 & echo $!"
+        process = subprocess.Popen(
+            cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        pid = int(process.communicate()[0].strip())
+        logger.info(f"Started task {task_id} with PID {pid}")
+        return pid
     except Exception as e:
-        print(f"Error processing task {task_id}: {str(e)}")
+        logger.error(f"Failed to start task {task_id}: {str(e)}")
+        return None
 
 
-def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
-    """Worker process that fetches tasks in batches and processes them."""
+def is_process_running(pid):
+    try:
+        process = psutil.Process(pid)
+        return process.is_running() and process.status() != psutil.STATUS_ZOMBIE
+    except psutil.NoSuchProcess:
+        return False
+
+
+def worker_process(worker_id, task_queue, shutdown_flag):
     django_setup()
-    from django.db import transaction
     from task.models import Task
     from worker.models import Worker
 
     worker = Worker.objects.create(name=f"Worker-{worker_id}", status="active")
-    print(f"Worker {worker.name} (PID: {os.getpid()}) started...")
+    logger.info(f"Worker {worker.name} (PID: {os.getpid()}) started...")
 
-    processed_tasks = 0
-    current_batch = []
-    current_process = None
-
-    while not shutdown_flag.is_set() and processed_tasks < total_tasks:
+    while not shutdown_flag.is_set():
         try:
-            if not current_batch:
-                with transaction.atomic():
-                    print("Fetching tasks...")
-                    tasks = (
-                        Task.objects.filter(status="pending")
-                        .select_for_update(skip_locked=True)
-                        .order_by("created_at")[:batch_size]
-                    )
+            task_id = task_queue.get(timeout=1)
+            logger.info(f"Worker {worker.name} processing task {task_id}")
 
-                    if not tasks:
-                        time.sleep(0.5)
-                        continue
+            with transaction.atomic():
+                task = Task.objects.select_for_update(skip_locked=True).get(id=task_id)
+                task.status = "processing"
+                task.worker = worker
+                task.save()
 
-                    task_ids = [task.id for task in tasks]
-                    Task.objects.filter(id__in=task_ids).update(
-                        status="processing", worker=worker
-                    )
-                    current_batch = task_ids
+            pid = execute_task(task_id)
+            if pid:
+                logger.info(f"Task {task_id} started with PID {pid}")
+                task.pid = pid
+                task.save()
+            else:
+                logger.error(f"Failed to start task {task_id}")
+                task.status = "failed"
+                task.save()
 
-                print(f"Fetched {len(current_batch)} tasks. Starting processing...")
-
-            # Process each task in the batch
-            for task_id in current_batch:
-                if shutdown_flag.is_set():
-                    print(f"Worker {worker.name}: Graceful shutdown in progress...")
-                    break  # Stop processing if shutdown signal is received
-
-                # Use multiprocessing.Process to run each task
-                current_process = multiprocessing.get_context("spawn").Process(
-                    target=process_task, args=(task_id,)
-                )
-                current_process.start()
-
-                if shutdown_flag.is_set():
-                    print(f"Waiting for current task {task_id} to complete...")
-                    current_process.join()
-                    break
-                current_process.join()  # Wait for the task to complete
-
-                processed_tasks += 1
-                print(f"Processed {processed_tasks}/{total_tasks} tasks.")
-
-            # Clear the current batch after processing all tasks
-            current_batch = []
-
+        except multiprocessing.queues.Empty:
+            continue
         except Exception as e:
-            print(f"Error in worker {worker.name}: {str(e)}")
-            time.sleep(1)
+            logger.error(f"Error in worker {worker.name}: {str(e)}")
 
-    print(f"Worker {worker.name} shutting down...")
+    logger.info(f"Worker {worker.name} shutting down...")
     worker.status = "inactive"
     worker.save()
 
 
 class Command(BaseCommand):
-    """Django management command to run worker processes."""
-
-    help = (
-        "Process tasks with multiple workers, fetching and executing them in batches."
-    )
+    help = "Process tasks with multiple workers concurrently"
 
     def add_arguments(self, parser):
         parser.add_argument(
-            "--workers", type=int, default=1, help="Number of worker processes."
-        )
-        parser.add_argument(
-            "--batch-size", type=int, default=5, help="Number of tasks per batch."
-        )
-        parser.add_argument(
-            "--total-tasks", type=int, default=20, help="Total tasks to process."
+            "--workers", type=int, default=4, help="Number of worker processes"
         )
 
     def handle(self, *args, **options):
         num_workers = options["workers"]
-        batch_size = options["batch_size"]
-        total_tasks = options["total_tasks"]
+        task_queue = multiprocessing.Queue()
+        shutdown_flag = multiprocessing.Event()
+        processes = []
 
-        # Use Manager for cross-process synchronization
-        with multiprocessing.get_context("spawn").Manager() as manager:
-            shutdown_flag = manager.Event()
-            processes = []
+        def signal_handler(signum, frame):
+            logger.info(f"Received signal {signum}. Stopping workers...")
+            shutdown_flag.set()
 
-            print(f"Starting {num_workers} workers...")
+        signal.signal(signal.SIGTERM, signal_handler)
+        signal.signal(signal.SIGINT, signal_handler)
 
-            for i in range(num_workers):
-                p = multiprocessing.get_context("spawn").Process(
-                    target=worker_process,
-                    args=(batch_size, total_tasks, shutdown_flag, i),
-                )
-                p.start()
-                processes.append(p)
+        for i in range(num_workers):
+            p = multiprocessing.Process(
+                target=worker_process, args=(i, task_queue, shutdown_flag)
+            )
+            p.start()
+            processes.append(p)
 
-            def signal_handler(signum, frame):
-                print("Received shutdown signal. Stopping workers...")
-                shutdown_flag.set()
+        try:
+            while not shutdown_flag.is_set():
+                django_setup()
+                from task.models import Task
 
-            signal.signal(signal.SIGTERM, signal_handler)
-            signal.signal(signal.SIGINT, signal_handler)
+                with transaction.atomic():
+                    pending_tasks = Task.objects.filter(
+                        status="pending"
+                    ).select_for_update(skip_locked=True)[:100]
+                    for task in pending_tasks:
+                        task_queue.put(task.id)
 
-            try:
-                for p in processes:
-                    p.join()
-            except KeyboardInterrupt:
-                print(
-                    "Received keyboard interrupt. Waiting for current tasks to complete..."
-                )
-                shutdown_flag.set()
-                for p in processes:
-                    p.join()
+                    # Check and update status of processing tasks
+                    processing_tasks = Task.objects.filter(status="processing")
+                    for task in processing_tasks:
+                        if task.pid and not is_process_running(task.pid):
+                            task.status = (
+                                "completed"  # Or you might want to check for failure
+                            )
+                            task.save()
 
-            print("All workers have completed.")
+                time.sleep(5)  # Wait before checking for new tasks again
+
+        except KeyboardInterrupt:
+            logger.info("Received keyboard interrupt. Stopping workers...")
+            shutdown_flag.set()
+
+        for p in processes:
+            p.join()
+
+        logger.info("All workers have shut down. Exiting.")
