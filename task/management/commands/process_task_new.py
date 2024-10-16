@@ -11,10 +11,10 @@ import subprocess
 # Configure logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-syslog_handler = logging.handlers.SysLogHandler(address="/dev/log")
-formatter = logging.Formatter("%(name)s: %(levelname)s %(message)s")
-syslog_handler.setFormatter(formatter)
-logger.addHandler(syslog_handler)
+# syslog_handler = logging.handlers.SysLogHandler(address="/dev/log")
+# formatter = logging.Formatter("%(name)s: %(levelname)s %(message)s")
+# syslog_handler.setFormatter(formatter)
+# logger.addHandler(syslog_handler)
 
 
 def django_setup():
@@ -25,7 +25,7 @@ def django_setup():
 
 def process_task(task_id):
     """Process a single task."""
-    
+
     os.setsid()
     django_setup()
     from django.utils import timezone
@@ -51,7 +51,7 @@ def process_task(task_id):
 
 
 def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
-    """Worker process that fetches tasks in batches and processes them."""
+    """Worker process that fetches tasks in batches and processes them one at a time."""
     django_setup()
     from task.models import Task
     from worker.models import Worker
@@ -64,6 +64,7 @@ def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
 
     while not shutdown_flag.is_set() and processed_tasks < total_tasks:
         try:
+            # Fetch tasks in batches if the current batch is empty
             if not current_batch:
                 with transaction.atomic():
                     print("Fetching tasks...")
@@ -85,43 +86,43 @@ def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
 
                 print(f"Fetched {len(current_batch)} tasks. Starting processing...")
 
-            # Start child processes without waiting for them
+            # Process tasks one by one
             for task_id in current_batch:
                 if shutdown_flag.is_set():
                     print(f"Worker {worker.name}: Graceful shutdown in progress...")
                     break
 
-                # Start the task as an independent process
-                # process = multiprocessing.get_context("spawn").Process(
-                #     target=process_task, args=(task_id,)
-                # )
-                # process.daemon = True  # Allow it to run even if parent exits
-                # process.start()
-                
-                # while process.is_alive():
-                #     print("process is alive----------------")
-                #     time.sleep(2)
-                
-                process= subprocess.Popen(
+                print(f"Processing task {task_id}")
+                process = subprocess.Popen(
                     ["python", "manage.py", "run_single_task", str(task_id)],
                     start_new_session=True,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                 )
-                
+
                 print(f"Started task {task_id} with PID {process.pid}")
-                
-                while process.returncode is None:
-                    print("process is alive----------------")
-                    time.sleep(1)
 
-               
+                # Wait for the process to complete
+                stdout, stderr = process.communicate()
 
-                # No need to join, let it run independently in the background
+                if process.returncode == 0:
+                    print(f"Task {task_id} completed successfully.")
+                    if stdout:
+                        print(f"Task output: {stdout.decode().strip()}")
+                else:
+                    print(
+                        f"Task {task_id} failed with return code {process.returncode}"
+                    )
+                    if stderr:
+                        print(f"Task error: {stderr.decode().strip()}")
+
                 processed_tasks += 1
                 print(f"Processed {processed_tasks}/{total_tasks} tasks.")
 
-            # Clear the batch after dispatching all tasks
+                if shutdown_flag.is_set() or processed_tasks >= total_tasks:
+                    break
+
+            # Clear the batch after processing all tasks in it
             current_batch = []
 
         except Exception as e:
