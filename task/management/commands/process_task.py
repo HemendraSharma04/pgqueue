@@ -7,11 +7,21 @@ import random
 import signal
 import sys
 import redis
+import logging
+from logging.handlers import SysLogHandler
 
 # Local Redis configuration
 REDIS_HOST = "localhost"
 REDIS_PORT = 6379
 REDIS_DB = 0
+
+# Configure logging
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+syslog_handler = SysLogHandler(address="/dev/log")
+formatter = logging.Formatter("%(name)s: %(levelname)s %(message)s")
+syslog_handler.setFormatter(formatter)
+logger.addHandler(syslog_handler)
 
 
 class Command(BaseCommand):
@@ -33,14 +43,15 @@ class Command(BaseCommand):
             if self.current_restart_id is None:
                 self.current_restart_id = restart_id
             elif restart_id != self.current_restart_id:
-                print("restart id changed!!!!!!!!!!!!!!!!!!!")
-                print(f"Restart ID changed from {self.current_restart_id} to {restart_id}. Initiating graceful restart...")
-                
+                logger.warning("restart id changed!!!!!!!!!!!!!!!!!!")
+                logger.warning(
+                    f"Restart ID changed from {self.current_restart_id} to {restart_id}. Initiating graceful restart..."
+                )
                 return True
         return False
 
     def process_task(self, task):
-        print(f"Running task with id {task.id}")
+        logger.info(f"Running task with id {task.id}")
         computation_time = random.randint(5, 10)  # 5 to 10 seconds
         time.sleep(computation_time)
         task.result = f"Computed for {computation_time} seconds"
@@ -50,19 +61,19 @@ class Command(BaseCommand):
         task.save()
 
     def signal_handler(self, signum, frame):
-        print("Received termination signal. Initiating graceful shutdown...")
+        logger.info("Received termination signal. Initiating graceful shutdown...")
         self.running = False
 
     def handle(self, *args, **options):
-        batch_size = options["batch_size"]
-        print(f"Starting task processing...")
+        batch_size = options["batch-size"]
+        logger.info(f"Starting task processing...")
 
         signal.signal(signal.SIGTERM, self.signal_handler)
         signal.signal(signal.SIGINT, self.signal_handler)
 
         while self.running:
             if self.check_for_restart():
-                print("Restarting due to restart_id change...")
+                logger.info("Restarting due to restart_id change...")
                 sys.exit(0)  # Exit with success code to allow systemd to restart
 
             try:
@@ -87,9 +98,7 @@ class Command(BaseCommand):
                     self.process_task(task)
 
             except Exception as e:
-                
-                print(f"Error in processing tasks: {str(e)}")
-                
+                logger.error(f"Error in processing tasks: {str(e)}")
                 time.sleep(1)
 
-        print("Graceful shutdown complete. Exiting.")
+        logger.info("Graceful shutdown complete. Exiting.")
