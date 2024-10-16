@@ -36,7 +36,7 @@ def process_task(task_id):
         for i in range(5):
             logger.info(f"Processing task {task_id} iteration {i}")
             print(f"Processing task {task_id} iteration {i}")
-            time.sleep(1)
+            time.sleep(3)
 
         task.result = f"Computed for {computation_time} seconds"
         task.status = "completed"
