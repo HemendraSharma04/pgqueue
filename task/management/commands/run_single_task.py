@@ -20,7 +20,6 @@ def django_setup():
     django.setup()
 
 
-
 def process_task(task_id):
     """Process a single task."""
 
@@ -56,4 +55,5 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         task_id = options["task_id"]
+        os.setsid()
         process_task(task_id)

@@ -160,61 +160,6 @@ def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
     worker.save()
 
 
-# class Command(BaseCommand):
-#     """Django management command to run worker processes."""
-
-#     help = (
-#         "Process tasks with multiple workers, fetching and executing them in batches."
-#     )
-
-#     def add_arguments(self, parser):
-#         parser.add_argument(
-#             "--workers", type=int, default=1, help="Number of worker processes."
-#         )
-#         parser.add_argument(
-#             "--batch-size", type=int, default=5, help="Number of tasks per batch."
-#         )
-#         parser.add_argument(
-#             "--total-tasks", type=int, default=20, help="Total tasks to process."
-#         )
-
-#     def handle(self, *args, **options):
-#         num_workers = options["workers"]
-#         batch_size = options["batch_size"]
-#         total_tasks = options["total_tasks"]
-
-#         # Use Manager for cross-process synchronization
-#         with multiprocessing.get_context("spawn").Manager() as manager:
-#             shutdown_flag = manager.Event()
-#             processes = []
-
-#             print(f"Starting {num_workers} workers...")
-
-#             for i in range(num_workers):
-#                 p = multiprocessing.get_context("spawn").Process(
-#                     target=worker_process,
-#                     args=(batch_size, total_tasks, shutdown_flag, i),
-#                 )
-#                 p.start()
-#                 processes.append(p)
-
-#             def signal_handler(signum, frame):
-#                 print("Received shutdown signal. Stopping workers...")
-#                 shutdown_flag.set()
-
-#             signal.signal(signal.SIGTERM, signal_handler)
-#             signal.signal(signal.SIGINT, signal_handler)
-
-#             try:
-#                 for p in processes:
-#                     p.join()
-#             except KeyboardInterrupt:
-#                 print("Received keyboard interrupt. Stopping workers...")
-#                 shutdown_flag.set()
-
-#             print("All workers have completed.")
-
-
 class Command(BaseCommand):
     help = (
         "Process tasks with multiple workers, fetching and executing them in batches."
