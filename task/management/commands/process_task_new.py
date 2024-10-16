@@ -103,7 +103,7 @@ def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
                 print(f"Started task {task_id} with PID {process.pid}")
 
                 # Wait for the process to complete
-                if not  shutdown_flag.is_set(): 
+                if not shutdown_flag.is_set(): 
                     stdout, stderr = process.communicate()
 
                     if process.returncode == 0:
