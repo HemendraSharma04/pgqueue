@@ -112,10 +112,12 @@ def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
 
                 print(f"Processing task {task_id}")
                 process = subprocess.Popen(
-                    ["python", "manage.py", "run_single_task", str(task_id)],
+                    ["nohup", "python", "manage.py", "run_single_task", str(task_id)],
                     start_new_session=True,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
+                    preexec_fn=os.setpgrp,
+                    close_fds=True,
                 )
 
                 print(f"Started task {task_id} with PID {process.pid}")
