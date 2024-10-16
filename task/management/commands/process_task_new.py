@@ -103,21 +103,22 @@ def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
                 print(f"Started task {task_id} with PID {process.pid}")
 
                 # Wait for the process to complete
-                stdout, stderr = process.communicate()
+                if not  shutdown_flag.is_set(): 
+                    stdout, stderr = process.communicate()
 
-                if process.returncode == 0:
-                    print(f"Task {task_id} completed successfully.")
-                    if stdout:
-                        print(f"Task output: {stdout.decode().strip()}")
-                else:
-                    print(
-                        f"Task {task_id} failed with return code {process.returncode}"
-                    )
-                    if stderr:
-                        print(f"Task error: {stderr.decode().strip()}")
+                    if process.returncode == 0:
+                        print(f"Task {task_id} completed successfully.")
+                        if stdout:
+                            print(f"Task output: {stdout.decode().strip()}")
+                    else:
+                        print(
+                            f"Task {task_id} failed with return code {process.returncode}"
+                        )
+                        if stderr:
+                            print(f"Task error: {stderr.decode().strip()}")
 
-                processed_tasks += 1
-                print(f"Processed {processed_tasks}/{total_tasks} tasks.")
+                    processed_tasks += 1
+                    print(f"Processed {processed_tasks}/{total_tasks} tasks.")
 
                 if shutdown_flag.is_set() or processed_tasks >= total_tasks:
                     break
