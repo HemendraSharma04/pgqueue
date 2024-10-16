@@ -7,6 +7,7 @@ from django.core.management.base import BaseCommand
 import multiprocessing
 from django.db import transaction
 import subprocess
+import sys
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -21,6 +22,23 @@ def django_setup():
     import django
 
     django.setup()
+
+
+def execute_task(task_id):
+    try:
+        process = subprocess.Popen(
+            ["nohup", "poetry", "run" ,"python", "manage.py", "run_single_task", str(task_id)],
+            stdout=open(f"/tmp/task_{task_id}.out", "w"),
+            stderr=open(f"/tmp/task_{task_id}.err", "w"),
+            preexec_fn=os.setpgrp,
+            close_fds=True,
+            start_new_session=True,
+        )
+        logger.info(f"Started task {task_id} with PID {process.pid}")
+        return process.pid
+    except Exception as e:
+        logger.error(f"Failed to start task {task_id}: {str(e)}")
+        return None
 
 
 def process_task(task_id):
@@ -137,9 +155,62 @@ def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
     worker.save()
 
 
-class Command(BaseCommand):
-    """Django management command to run worker processes."""
+# class Command(BaseCommand):
+#     """Django management command to run worker processes."""
 
+#     help = (
+#         "Process tasks with multiple workers, fetching and executing them in batches."
+#     )
+
+#     def add_arguments(self, parser):
+#         parser.add_argument(
+#             "--workers", type=int, default=1, help="Number of worker processes."
+#         )
+#         parser.add_argument(
+#             "--batch-size", type=int, default=5, help="Number of tasks per batch."
+#         )
+#         parser.add_argument(
+#             "--total-tasks", type=int, default=20, help="Total tasks to process."
+#         )
+
+#     def handle(self, *args, **options):
+#         num_workers = options["workers"]
+#         batch_size = options["batch_size"]
+#         total_tasks = options["total_tasks"]
+
+#         # Use Manager for cross-process synchronization
+#         with multiprocessing.get_context("spawn").Manager() as manager:
+#             shutdown_flag = manager.Event()
+#             processes = []
+
+#             print(f"Starting {num_workers} workers...")
+
+#             for i in range(num_workers):
+#                 p = multiprocessing.get_context("spawn").Process(
+#                     target=worker_process,
+#                     args=(batch_size, total_tasks, shutdown_flag, i),
+#                 )
+#                 p.start()
+#                 processes.append(p)
+
+#             def signal_handler(signum, frame):
+#                 print("Received shutdown signal. Stopping workers...")
+#                 shutdown_flag.set()
+
+#             signal.signal(signal.SIGTERM, signal_handler)
+#             signal.signal(signal.SIGINT, signal_handler)
+
+#             try:
+#                 for p in processes:
+#                     p.join()
+#             except KeyboardInterrupt:
+#                 print("Received keyboard interrupt. Stopping workers...")
+#                 shutdown_flag.set()
+
+#             print("All workers have completed.")
+
+
+class Command(BaseCommand):
     help = (
         "Process tasks with multiple workers, fetching and executing them in batches."
     )
@@ -160,33 +231,36 @@ class Command(BaseCommand):
         batch_size = options["batch_size"]
         total_tasks = options["total_tasks"]
 
-        # Use Manager for cross-process synchronization
-        with multiprocessing.get_context("spawn").Manager() as manager:
-            shutdown_flag = manager.Event()
-            processes = []
+        shutdown_flag = multiprocessing.Event()
+        processes = []
 
-            print(f"Starting {num_workers} workers...")
+        def signal_handler(signum, frame):
+            logger.info(f"Received signal {signum}. Stopping workers...")
+            shutdown_flag.set()
+            # Give workers a moment to start shutting down
+            time.sleep(2)
+            # Exit the main process
+            sys.exit(0)
 
-            for i in range(num_workers):
-                p = multiprocessing.get_context("spawn").Process(
-                    target=worker_process,
-                    args=(batch_size, total_tasks, shutdown_flag, i),
-                )
-                p.start()
-                processes.append(p)
+        signal.signal(signal.SIGTERM, signal_handler)
+        signal.signal(signal.SIGINT, signal_handler)
 
-            def signal_handler(signum, frame):
-                print("Received shutdown signal. Stopping workers...")
-                shutdown_flag.set()
+        logger.info(f"Starting {num_workers} workers...")
 
-            signal.signal(signal.SIGTERM, signal_handler)
-            signal.signal(signal.SIGINT, signal_handler)
+        for i in range(num_workers):
+            p = multiprocessing.Process(
+                target=worker_process,
+                args=(batch_size, total_tasks, shutdown_flag, i),
+            )
+            p.start()
+            processes.append(p)
 
-            try:
-                for p in processes:
-                    p.join()
-            except KeyboardInterrupt:
-                print("Received keyboard interrupt. Stopping workers...")
-                shutdown_flag.set()
+        try:
+            # Wait for workers to complete or for a shutdown signal
+            while any(p.is_alive() for p in processes):
+                time.sleep(1)
+        except KeyboardInterrupt:
+            logger.info("Received keyboard interrupt. Stopping workers...")
+            shutdown_flag.set()
 
-            print("All workers have completed.")
+        logger.info("Main process exiting.")
