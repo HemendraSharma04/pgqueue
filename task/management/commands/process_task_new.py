@@ -140,7 +140,7 @@ def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
                     processed_tasks += 1
                     print(f"Processed {processed_tasks}/{total_tasks} tasks.")
                 else:
-                    print("shutting down~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
+                    print("shutting down~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",flush=True)
 
                 if shutdown_flag.is_set() or processed_tasks >= total_tasks:
                     break
