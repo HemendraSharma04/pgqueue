@@ -51,7 +51,9 @@ class Command(BaseCommand):
         return False
 
     def process_task(self, task):
-        logger.info(f"Running task with id {task.id}")
+        logger.info(
+            f"Running task with id {task.id} and deployment id {self.current_restart_id}"
+        )
         computation_time = random.randint(5, 10)  # 5 to 10 seconds
         time.sleep(computation_time)
         task.result = f"Computed for {computation_time} seconds"
