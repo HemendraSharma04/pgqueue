@@ -2,7 +2,6 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 from task.models import Task
-import os
 import time
 import random
 import signal
@@ -19,19 +18,29 @@ class Command(BaseCommand):
     help = "Process tasks with workers that fetch their own tasks"
 
     def add_arguments(self, parser):
-        parser.add_argument("--batch-size", type=int, default=100)
+        parser.add_argument("--batch-size", type=int, default=5)
 
     def __init__(self):
         super().__init__()
         self.running = True
+        self.current_restart_id = None
 
-    def check_for_graceful_restart(self):
+    def check_for_restart(self):
         r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB)
         restart_id = r.get("restart_id")
-        return restart_id is not None
+        if restart_id is not None:
+            restart_id = restart_id.decode("utf-8")
+            if self.current_restart_id is None:
+                self.current_restart_id = restart_id
+            elif restart_id != self.current_restart_id:
+                print("restart id changed!!!!!!!!!!!!!!!!!!!")
+                print(f"Restart ID changed from {self.current_restart_id} to {restart_id}. Initiating graceful restart...")
+                
+                return True
+        return False
 
     def process_task(self, task):
-        # Simulate a long-running task
+        print(f"Running task with id {task.id}")
         computation_time = random.randint(5, 10)  # 5 to 10 seconds
         time.sleep(computation_time)
         task.result = f"Computed for {computation_time} seconds"
@@ -41,26 +50,22 @@ class Command(BaseCommand):
         task.save()
 
     def signal_handler(self, signum, frame):
-        self.stdout.write(
-            f"Signal {signum} received. Preparing for graceful shutdown..."
-        )
+        print("Received termination signal. Initiating graceful shutdown...")
         self.running = False
 
     def handle(self, *args, **options):
         batch_size = options["batch_size"]
-        self.stdout.write(f"Starting task processing...")
+        print(f"Starting task processing...")
 
-        # Register signal handlers for graceful shutdown
         signal.signal(signal.SIGTERM, self.signal_handler)
         signal.signal(signal.SIGINT, self.signal_handler)
 
         while self.running:
-            try:
-                # Check if a graceful restart is requested
-                if self.check_for_graceful_restart():
-                    self.stdout.write("Graceful restart detected. Exiting...")
-                    break
+            if self.check_for_restart():
+                print("Restarting due to restart_id change...")
+                sys.exit(0)  # Exit with success code to allow systemd to restart
 
+            try:
                 with transaction.atomic():
                     tasks = (
                         Task.objects.filter(status="pending")
@@ -70,18 +75,21 @@ class Command(BaseCommand):
                     task_ids = list(tasks.values_list("id", flat=True))
 
                     if not task_ids:
-                        time.sleep(0.1)  # Short sleep if no tasks found
+                        time.sleep(0.1)
                         continue
 
                     Task.objects.filter(id__in=task_ids).update(status="processing")
 
-                # Execute tasks one by one
                 for task_id in task_ids:
-                    task = Task.objects.get(id=task_id)  # Fetch the task to process
-                    self.process_task(task)  # Process the task
+                    if not self.running:
+                        break
+                    task = Task.objects.get(id=task_id)
+                    self.process_task(task)
 
             except Exception as e:
-                self.stdout.write(f"Error in processing tasks: {str(e)}")
-                time.sleep(1)  # Wait a bit before trying again
+                
+                print(f"Error in processing tasks: {str(e)}")
+                
+                time.sleep(1)
 
-        self.stdout.write(self.style.SUCCESS("All tasks have been processed."))
+        print("Graceful shutdown complete. Exiting.")
