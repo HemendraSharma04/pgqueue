@@ -8,10 +8,10 @@ import os
 # Configure logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-# syslog_handler = logging.handlers.SysLogHandler(address="/dev/log")
-# formatter = logging.Formatter("%(name)s: %(levelname)s %(message)s")
-# syslog_handler.setFormatter(formatter)
-# logger.addHandler(syslog_handler)
+syslog_handler = logging.handlers.SysLogHandler(address="/dev/log")
+formatter = logging.Formatter("%(name)s: %(levelname)s %(message)s")
+syslog_handler.setFormatter(formatter)
+logger.addHandler(syslog_handler)
 
 
 def django_setup():
