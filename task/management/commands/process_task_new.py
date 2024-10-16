@@ -6,6 +6,7 @@ import logging.handlers
 from django.core.management.base import BaseCommand
 import multiprocessing
 from django.db import transaction
+import subprocess
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -91,17 +92,30 @@ def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
                     break
 
                 # Start the task as an independent process
-                process = multiprocessing.get_context("spawn").Process(
-                    target=process_task, args=(task_id,)
-                )
-                process.daemon = True  # Allow it to run even if parent exits
-                process.start()
+                # process = multiprocessing.get_context("spawn").Process(
+                #     target=process_task, args=(task_id,)
+                # )
+                # process.daemon = True  # Allow it to run even if parent exits
+                # process.start()
                 
-                while process.is_alive():
-                    print("process is alive----------------")
-                    time.sleep(2)
-
+                # while process.is_alive():
+                #     print("process is alive----------------")
+                #     time.sleep(2)
+                
+                process= subprocess.Popen(
+                    ["python", "manage.py", "run_single_task", str(task_id)],
+                    start_new_session=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                
                 print(f"Started task {task_id} with PID {process.pid}")
+                
+                while process.returncode is None:
+                    print("process is alive----------------")
+                    time.sleep(1)
+
+               
 
                 # No need to join, let it run independently in the background
                 processed_tasks += 1
