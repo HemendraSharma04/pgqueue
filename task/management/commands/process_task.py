@@ -65,8 +65,8 @@ class Command(BaseCommand):
         self.running = False
 
     def handle(self, *args, **options):
-        batch_size = options["batch-size"]
-        logger.info(f"Starting task processing...")
+        batch_size = options["batch_size"]  
+        logger.info(f"Starting task processing with batch size: {batch_size}")
 
         signal.signal(signal.SIGTERM, self.signal_handler)
         signal.signal(signal.SIGINT, self.signal_handler)
