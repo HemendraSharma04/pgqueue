@@ -114,8 +114,8 @@ def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
                 process = subprocess.Popen(
                     ["nohup", "poetry","run", "python", "manage.py", "run_single_task", str(task_id)],
                     start_new_session=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
                     # preexec_fn=os.setpgrp,
                     close_fds=True,
                 )
@@ -141,6 +141,9 @@ def worker_process(batch_size, total_tasks, shutdown_flag, worker_id):
                     print(f"Processed {processed_tasks}/{total_tasks} tasks.")
                 else:
                     print("shutting down~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",flush=True)
+                    logger.info(
+                        "shutting down~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+                    )
 
                 if shutdown_flag.is_set() or processed_tasks >= total_tasks:
                     break
